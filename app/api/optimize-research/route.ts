@@ -1,17 +1,16 @@
 import { NextResponse } from 'next/server'
 import { reportContentRatelimit } from '@/lib/redis'
 import { CONFIG } from '@/lib/config'
-import { extractAndParseJSON } from '@/lib/utils'
+import { extractAndParseJSON, softParse } from '@/lib/utils'
 import { generateWithModel } from '@/lib/models'
 import { type ModelVariant } from '@/types'
 
 export async function POST(request: Request) {
   try {
-    const { prompt, platformModel = 'google__gemini-flash' } =
-      (await request.json()) as {
-        prompt: string
-        platformModel: ModelVariant
-      }
+    const { prompt, platformModel = 'google__gemini-flash' } = (await request.json()) as {
+      prompt: string
+      platformModel: ModelVariant
+    }
 
     if (!prompt) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 })
@@ -21,14 +20,9 @@ export async function POST(request: Request) {
     if (prompt.toLowerCase() === 'test') {
       return NextResponse.json({
         query: 'test',
-        optimizedPrompt:
-          'Analyze and compare different research methodologies, focusing on scientific rigor, peer review processes, and validation techniques',
+        optimizedPrompt: 'Analyze and compare different research methodologies, focusing on scientific rigor, peer review processes, and validation techniques',
         explanation: 'Test optimization strategy',
-        suggestedStructure: [
-          'Test Structure 1',
-          'Test Structure 2',
-          'Test Structure 3',
-        ],
+        suggestedStructure: ['Test Structure 1', 'Test Structure 2', 'Test Structure 3'],
       })
     }
 
@@ -36,40 +30,25 @@ export async function POST(request: Request) {
     const platform = platformModel.split('__')[0]
     const model = platformModel.split('__')[1]
     if (CONFIG.rateLimits.enabled && platform !== 'ollama') {
-      const { success } = await reportContentRatelimit.limit(
-        'agentOptimizations'
-      )
+      const { success } = await reportContentRatelimit.limit('agentOptimizations')
       if (!success) {
-        return NextResponse.json(
-          { error: 'Too many requests' },
-          { status: 429 }
-        )
+        return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
       }
     }
 
     // Check if selected platform is enabled
-    const platformConfig =
-      CONFIG.platforms[platform as keyof typeof CONFIG.platforms]
+    const platformConfig = CONFIG.platforms[platform as keyof typeof CONFIG.platforms]
     if (!platformConfig?.enabled) {
-      return NextResponse.json(
-        { error: `${platform} platform is not enabled` },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: `${platform} platform is not enabled` }, { status: 400 })
     }
 
     // Check if selected model exists and is enabled
     const modelConfig = (platformConfig as any).models[model]
     if (!modelConfig) {
-      return NextResponse.json(
-        { error: `${model} model does not exist` },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: `${model} model does not exist` }, { status: 400 })
     }
     if (!modelConfig.enabled) {
-      return NextResponse.json(
-        { error: `${model} model is disabled` },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: `${model} model is disabled` }, { status: 400 })
     }
 
     const systemPrompt = `You are a research assistant tasked with optimizing a research topic into an effective search query.
@@ -109,27 +88,29 @@ Make the query clear and focused, avoiding overly complex or lengthy constructio
       }
 
       try {
+        // First try with softParse for more robust handling
+        try {
+          const parsedResponse = softParse(response)
+          if (typeof parsedResponse === 'object' && parsedResponse !== null) {
+            return NextResponse.json(parsedResponse)
+          }
+        } catch {
+          console.log('Soft parse failed, falling back to extractAndParseJSON')
+        }
+
+        // Fall back to the more comprehensive parser if needed
         const parsedResponse = extractAndParseJSON(response)
         return NextResponse.json(parsedResponse)
       } catch (parseError) {
         console.error('Failed to parse optimization:', parseError)
-        return NextResponse.json(
-          { error: 'Failed to optimize research' },
-          { status: 500 }
-        )
+        return NextResponse.json({ error: 'Failed to optimize research' }, { status: 500 })
       }
     } catch (error) {
       console.error('Model generation error:', error)
-      return NextResponse.json(
-        { error: 'Failed to generate optimization' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'Failed to generate optimization' }, { status: 500 })
     }
   } catch (error) {
     console.error('Research optimization failed:', error)
-    return NextResponse.json(
-      { error: 'Failed to optimize research' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to optimize research' }, { status: 500 })
   }
 }

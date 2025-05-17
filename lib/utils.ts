@@ -5,7 +5,64 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export function softParse(text: string) {
+  // First try direct parse
+  try {
+    return JSON.parse(text)
+  } catch {
+    // Ignore, continue with more robust methods
+  }
+
+  // Look for code blocks with JSON
+  const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)```/
+  const match = text.match(codeBlockRegex)
+  if (match && match[1]) {
+    try {
+      return JSON.parse(match[1])
+    } catch {
+      // Continue with further cleaning
+      try {
+        // Clean common JSON issues: trailing commas, unquoted keys, etc.
+        const cleanedJson = match[1]
+          .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+          .replace(/([{,])\s*(\w+)\s*:/g, '$1"$2":') // Quote unquoted keys
+          .replace(/:\s*'([^']*)'/g, ':"$1"') // Replace single quotes with double quotes
+        return JSON.parse(cleanedJson)
+      } catch {
+        // Ignore, try next method
+      }
+    }
+  }
+
+  // Look for content between outermost braces
+  try {
+    const braceContent = text.match(/{[\s\S]*}/)?.[0]
+    if (braceContent) {
+      return JSON.parse(braceContent)
+    }
+  } catch {
+    // Ignore
+  }
+
+  // If all else fails, return the original text
+  return text
+}
+
 export function extractAndParseJSON(response: string) {
+  // First attempt: use the more robust softParse
+  try {
+    console.log('Attempt 1 - Using softParse, input:', response.slice(0, 100) + '...')
+    const result = softParse(response)
+    if (typeof result === 'object' && result !== null) {
+      console.log('Attempt 1 succeeded with softParse')
+      return result
+    } else {
+      console.log('Attempt 1 failed: softParse returned non-object:', typeof result)
+    }
+  } catch (e) {
+    console.log('Attempt 1 failed with softParse:', e)
+  }
+
   function cleanJson(jsonStr: string): string {
     return (
       jsonStr
@@ -25,46 +82,37 @@ export function extractAndParseJSON(response: string) {
     )
   }
 
-  // First attempt: Try to parse the entire response as JSON
+  // Second attempt: Try to parse the entire response as JSON
   try {
-    console.log(
-      'Attempt 1 - Full parse, input:',
-      response.slice(0, 100) + '...'
-    )
+    console.log('Attempt 2 - Full parse, input:', response.slice(0, 100) + '...')
     const result = JSON.parse(response)
-    console.log('Attempt 1 succeeded')
+    console.log('Attempt 2 succeeded')
     return result
   } catch (e) {
-    console.log('Attempt 1 failed:', e)
+    console.log('Attempt 2 failed:', e)
   }
 
-  // Second attempt: Look for JSON within code blocks
+  // Third attempt: Look for JSON within code blocks
   const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)```/
   const codeBlockMatch = response.match(codeBlockRegex)
 
   if (codeBlockMatch) {
     try {
-      console.log(
-        'Attempt 2 - Code block found, content:',
-        codeBlockMatch[1].slice(0, 100) + '...'
-      )
+      console.log('Attempt 3 - Code block found, content:', codeBlockMatch[1].slice(0, 100) + '...')
       const cleanedJson = cleanJson(codeBlockMatch[1])
-      console.log(
-        'Attempt 2 - Cleaned JSON:',
-        cleanedJson.slice(0, 100) + '...'
-      )
+      console.log('Attempt 3 - Cleaned JSON:', cleanedJson.slice(0, 100) + '...')
       const result = JSON.parse(cleanedJson)
-      console.log('Attempt 2 succeeded')
+      console.log('Attempt 3 succeeded')
       return result
     } catch (e) {
-      console.log('Attempt 2 failed:', e)
+      console.log('Attempt 3 failed:', e)
     }
   } else {
-    console.log('Attempt 2 - No code block found')
+    console.log('Attempt 3 - No code block found')
   }
 
-  // Third attempt: Find the outermost matching braces
-  console.log('Attempt 3 - Starting bracket matching')
+  // Fourth attempt: Find the outermost matching braces
+  console.log('Attempt 4 - Starting bracket matching')
   let bracketCount = 0
   let startIndex = -1
   let endIndex = -1
@@ -89,28 +137,23 @@ export function extractAndParseJSON(response: string) {
         if (bracketCount === 0) {
           startIndex = i
           foundStart = true
-          console.log('Attempt 3 - Found opening brace at index:', i)
+          console.log('Attempt 4 - Found opening brace at index:', i)
         }
         bracketCount++
       } else if (response[i] === '}') {
         bracketCount--
         if (bracketCount === 0 && foundStart) {
           endIndex = i + 1
-          console.log('Attempt 3 - Found matching closing brace at index:', i)
+          console.log('Attempt 4 - Found matching closing brace at index:', i)
           // Try parsing this JSON substring with cleanup
           try {
-            const jsonCandidate = cleanJson(
-              response.substring(startIndex, endIndex)
-            )
-            console.log(
-              'Attempt 3 - Trying to parse substring:',
-              jsonCandidate.slice(0, 100) + '...'
-            )
+            const jsonCandidate = cleanJson(response.substring(startIndex, endIndex))
+            console.log('Attempt 4 - Trying to parse substring:', jsonCandidate.slice(0, 100) + '...')
             const result = JSON.parse(jsonCandidate)
-            console.log('Attempt 3 succeeded')
+            console.log('Attempt 4 succeeded')
             return result
           } catch (e) {
-            console.log('Attempt 3 - Parse failed for this substring:', e)
+            console.log('Attempt 4 - Parse failed for this substring:', e)
             foundStart = false // Reset to keep looking
             continue
           }
